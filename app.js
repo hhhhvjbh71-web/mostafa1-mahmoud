@@ -2157,6 +2157,55 @@ function initFilters() {
 }
 
 // --- 2. Students & Groups Logic ---
+// ── كود الباركود اليدوي: وظائف التبديل والتحقق ──────────────────
+
+function toggleStudentCodeMode(isManual) {
+    const label = document.getElementById('std-code-mode-label');
+    const autoDisplay = document.getElementById('std-code-auto-display');
+    const manualField = document.getElementById('std-code-manual-field');
+    const toggle = document.getElementById('std-code-manual-toggle');
+    const knob = toggle ? toggle.nextElementSibling : null;
+
+    if (isManual) {
+        if (label) label.textContent = 'يدوي';
+        if (autoDisplay) autoDisplay.style.display = 'none';
+        if (manualField) manualField.style.display = 'block';
+        if (knob) knob.style.background = 'var(--accent)';
+        const inp = document.getElementById('std-manual-code');
+        if (inp) setTimeout(() => inp.focus(), 50);
+    } else {
+        if (label) label.textContent = 'تلقائي';
+        if (autoDisplay) autoDisplay.style.display = 'block';
+        if (manualField) manualField.style.display = 'none';
+        if (knob) knob.style.background = '#ccc';
+        const inp = document.getElementById('std-manual-code');
+        if (inp) inp.value = '';
+        const msg = document.getElementById('std-code-validation-msg');
+        if (msg) msg.textContent = '';
+    }
+}
+
+function validateManualCode(val) {
+    const msg = document.getElementById('std-code-validation-msg');
+    if (!msg) return;
+    const clean = val.trim();
+    if (!clean) { msg.textContent = ''; return; }
+    if (!/^\d+$/.test(clean)) {
+        msg.innerHTML = '<span style="color:#ef4444"><i class="fas fa-times-circle"></i> الكود يجب أن يحتوي أرقاماً فقط</span>';
+        return;
+    }
+    if (clean.length < 4) {
+        msg.innerHTML = '<span style="color:#f59e0b"><i class="fas fa-exclamation-circle"></i> الكود قصير جداً (4 أرقام على الأقل)</span>';
+        return;
+    }
+    const exists = db.students.find(s => String(s.qrCode) === clean);
+    if (exists) {
+        msg.innerHTML = '<span style="color:#ef4444"><i class="fas fa-times-circle"></i> الكود مستخدم بالفعل للطالب: ' + exists.name + '</span>';
+        return;
+    }
+    msg.innerHTML = '<span style="color:#10b981"><i class="fas fa-check-circle"></i> الكود متاح ✓</span>';
+}
+
 async function handleStudentSubmit() {
     const submitBtn = document.querySelector('#student-modal button[onclick="handleStudentSubmit()"]');
     try {
@@ -2182,11 +2231,27 @@ async function handleStudentSubmit() {
 
         if (!StorageEngine.db) await StorageEngine.init();
 
-        // ── توليد الكود عبر المولّد المركزي (code-generator.js) ──
-        // الكود: 12 رقمًا إنجليزيًا فقط، بلا حروف أو رموز أو شرطات
-        const uniqueCode = (typeof generateLocalUniqueCode === 'function')
-            ? generateLocalUniqueCode(db.students)
-            : ('1' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 900 + 100));
+        // ── اختيار الكود: يدوي أو تلقائي ──────────────────────────
+        const isManualMode = document.getElementById('std-code-manual-toggle') && document.getElementById('std-code-manual-toggle').checked;
+        let uniqueCode;
+        if (isManualMode) {
+            const manualVal = (document.getElementById('std-manual-code') || {value:''}).value.trim();
+            if (!manualVal || !/^\d+$/.test(manualVal) || manualVal.length < 4) {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = 'حفظ البيانات'; }
+                return showNotification('يرجى إدخال كود صحيح (أرقام فقط، 4 أرقام على الأقل)', 'error');
+            }
+            const alreadyExists = db.students.find(s => String(s.qrCode) === manualVal);
+            if (alreadyExists) {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = 'حفظ البيانات'; }
+                return showNotification('الكود ' + manualVal + ' مستخدم بالفعل للطالب: ' + alreadyExists.name, 'error');
+            }
+            uniqueCode = manualVal;
+        } else {
+            // ── توليد الكود عبر المولّد المركزي (code-generator.js) ──
+            uniqueCode = (typeof generateLocalUniqueCode === 'function')
+                ? generateLocalUniqueCode(db.students)
+                : ('1' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 900 + 100));
+        }
 
         const student = {
             id: Date.now(), name, phone, grade: targetGrade, groupId, parentPhone: parent,
@@ -2225,6 +2290,9 @@ async function handleStudentSubmit() {
         document.getElementById('std-phone').value = '';
         document.getElementById('std-parent').value = '';
         document.getElementById('std-group').value = '';
+        // إعادة ضبط خانة الكود اليدوي
+        const codeToggle = document.getElementById('std-code-manual-toggle');
+        if (codeToggle) { codeToggle.checked = false; toggleStudentCodeMode(false); }
 
         toggleModal('student-modal', false);
         showNotification('تم إضافة الطالب بنجاح');
@@ -4934,6 +5002,227 @@ function exitPortalMode() {
 // --- 7. Fast Grading AI Engine ---
 // fastGradingScanner already declared in global state section above
 let currentFastStudent = null;
+
+// ══════════════════════════════════════════════════════════════
+//  الرصد اليدوي الجماعي  —  Bulk Manual Grading
+// ══════════════════════════════════════════════════════════════
+
+let _bulkGradingStudents = []; // الطلاب المعروضين في الجدول
+
+function switchGradingTab(tab) {
+    const scannerTab = document.getElementById('grading-tab-scanner');
+    const bulkTab    = document.getElementById('grading-tab-bulk');
+    const btnScanner = document.getElementById('tab-scanner-grading');
+    const btnBulk    = document.getElementById('tab-bulk-grading');
+    if (!scannerTab || !bulkTab) return;
+
+    if (tab === 'bulk') {
+        scannerTab.style.display = 'none';
+        bulkTab.style.display   = 'block';
+        btnScanner.style.background = 'white';
+        btnScanner.style.color      = 'var(--primary)';
+        btnBulk.style.background    = 'var(--primary)';
+        btnBulk.style.color         = 'white';
+        initBulkGrading();
+    } else {
+        bulkTab.style.display   = 'none';
+        scannerTab.style.display = 'block';
+        btnBulk.style.background    = 'white';
+        btnBulk.style.color         = 'var(--primary)';
+        btnScanner.style.background = 'var(--primary)';
+        btnScanner.style.color      = 'white';
+    }
+}
+
+function initBulkGrading() {
+    const examSel  = document.getElementById('bulk-exam-select');
+    const groupSel = document.getElementById('bulk-group-select');
+    if (!examSel || !groupSel) return;
+
+    const exams  = db.exams.filter(e => String(e.grade) === String(currentGrade));
+    const groups = db.groups.filter(g => String(g.grade) === String(currentGrade));
+
+    examSel.innerHTML = '<option value="">-- اختر الامتحان --</option>' +
+        exams.map(e => `<option value="${e.id}">${e.title} (${e.maxMarks})</option>`).join('');
+
+    groupSel.innerHTML = '<option value="">-- اختر المجموعة --</option>' +
+        groups.map(g => `<option value="${g.id}" ${String(g.id) === String(currentGroupId) ? 'selected' : ''}>${g.name}</option>`).join('');
+
+    // اختر آخر امتحان تلقائياً
+    if (exams.length > 0) {
+        examSel.value = exams[exams.length - 1].id;
+        const maxInp = document.getElementById('bulk-max-marks');
+        if (maxInp) maxInp.value = exams[exams.length - 1].maxMarks || 100;
+    }
+
+    loadBulkGradingTable();
+}
+
+function loadBulkGradingTable() {
+    const examId  = document.getElementById('bulk-exam-select')  && document.getElementById('bulk-exam-select').value;
+    const groupId = document.getElementById('bulk-group-select') && document.getElementById('bulk-group-select').value;
+    const tbody   = document.getElementById('bulk-grading-tbody');
+    if (!tbody) return;
+
+    // تحديث الدرجة الكاملة عند تغيير الامتحان
+    if (examId) {
+        const ex = db.exams.find(e => String(e.id) === String(examId));
+        const maxInp = document.getElementById('bulk-max-marks');
+        if (ex && maxInp) maxInp.value = ex.maxMarks || 100;
+    }
+
+    if (!examId || !groupId) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--text-muted);">اختر الامتحان والمجموعة أولاً</td></tr>';
+        _bulkGradingStudents = [];
+        return;
+    }
+
+    const students = db.students.filter(s =>
+        String(s.grade)   === String(currentGrade) &&
+        String(s.groupId) === String(groupId)
+    ).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+
+    _bulkGradingStudents = students;
+
+    if (students.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب في هذه المجموعة</td></tr>';
+        return;
+    }
+
+    const maxMark = parseFloat(document.getElementById('bulk-max-marks').value) || 100;
+
+    tbody.innerHTML = students.map((s, idx) => {
+        const existing = db.scores.find(sc => String(sc.examId) === String(examId) && String(sc.studentId) === String(s.id));
+        const markVal  = existing ? (existing.mark === -1 ? '' : existing.mark) : '';
+        const isAbsent = existing && existing.mark === -1;
+        const rowBg    = isAbsent ? '#fff5f5' : (existing ? '#f0fdf4' : '');
+        const badge    = isAbsent
+            ? '<span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:10px; font-size:0.78rem;">غائب</span>'
+            : (existing
+                ? '<span style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:10px; font-size:0.78rem;">مرصود ✓</span>'
+                : '<span style="color:var(--text-muted); font-size:0.78rem;">—</span>');
+
+        return `<tr id="bulk-row-${s.id}" style="background:${rowBg}; transition: background 0.3s;">
+            <td style="padding:8px 14px; color:var(--text-muted); font-weight:700;">${idx + 1}</td>
+            <td style="padding:8px 14px; font-weight:700;">${s.name}</td>
+            <td style="padding:6px 10px; text-align:center;">
+                <input type="number" id="bulk-mark-${s.id}"
+                    value="${markVal}"
+                    min="0" max="${maxMark}"
+                    placeholder="—"
+                    data-student-id="${s.id}"
+                    data-row-index="${idx}"
+                    onkeydown="bulkMarkKeyDown(event, '${s.id}', ${idx})"
+                    onchange="highlightBulkRow('${s.id}', this.value)"
+                    style="width:90px; text-align:center; padding:6px 8px; border:2px solid var(--border); border-radius:8px; font-size:1rem; font-weight:700;">
+            </td>
+            <td id="bulk-badge-${s.id}" style="padding:8px 10px; text-align:center;">${badge}</td>
+        </tr>`;
+    }).join('');
+
+    // فوكس على أول خانة فارغة
+    const firstEmpty = students.findIndex(s => {
+        const ex = db.scores.find(sc => String(sc.examId) === String(examId) && String(sc.studentId) === String(s.id));
+        return !ex;
+    });
+    const focusIdx = firstEmpty >= 0 ? firstEmpty : 0;
+    if (students[focusIdx]) {
+        setTimeout(() => {
+            const inp = document.getElementById('bulk-mark-' + students[focusIdx].id);
+            if (inp) inp.focus();
+        }, 100);
+    }
+}
+
+function bulkMarkKeyDown(event, studentId, rowIndex) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+
+    const inp     = document.getElementById('bulk-mark-' + studentId);
+    const rawVal  = inp ? inp.value.trim() : '';
+    const examId  = document.getElementById('bulk-exam-select').value;
+    const maxMark = parseFloat(document.getElementById('bulk-max-marks').value) || 100;
+
+    if (rawVal !== '' && !isNaN(parseFloat(rawVal))) {
+        const mark = parseFloat(rawVal);
+        if (mark < 0 || mark > maxMark) {
+            showNotification('الدرجة يجب أن تكون بين 0 و ' + maxMark, 'warning');
+            return;
+        }
+        // حفظ فوري
+        _saveSingleBulkGrade(studentId, examId, mark);
+    }
+
+    // انتقل للطالب التالي
+    const nextIdx = rowIndex + 1;
+    if (_bulkGradingStudents[nextIdx]) {
+        const nextInp = document.getElementById('bulk-mark-' + _bulkGradingStudents[nextIdx].id);
+        if (nextInp) {
+            nextInp.focus();
+            nextInp.select();
+        }
+    } else {
+        showNotification('تم الوصول لآخر طالب في القائمة ✅', 'success');
+    }
+}
+
+function highlightBulkRow(studentId, val) {
+    const row = document.getElementById('bulk-row-' + studentId);
+    if (row && val !== '') {
+        row.style.background = '#fefce8';
+    }
+}
+
+function _saveSingleBulkGrade(studentId, examId, mark) {
+    const student = db.students.find(s => String(s.id) === String(studentId));
+    if (!student || !examId) return;
+
+    const existingIdx = db.scores.findIndex(sc =>
+        String(sc.examId) === String(examId) && String(sc.studentId) === String(studentId)
+    );
+    if (existingIdx > -1) {
+        db.scores[existingIdx].mark = mark;
+        db.scores[existingIdx].date = new Date().toISOString();
+    } else {
+        db.scores.push({
+            id: Date.now() + Math.random(),
+            examId: parseInt(examId),
+            studentId: student.id,
+            mark: mark,
+            date: new Date().toISOString()
+        });
+    }
+    db.save();
+
+    // تحديث الـ badge في الصف
+    const badge = document.getElementById('bulk-badge-' + studentId);
+    const row   = document.getElementById('bulk-row-' + studentId);
+    if (badge) badge.innerHTML = '<span style="background:#dcfce7; color:#166534; padding:2px 8px; border-radius:10px; font-size:0.78rem;">مرصود ✓</span>';
+    if (row)   row.style.background = '#f0fdf4';
+}
+
+function saveBulkGrades() {
+    const examId  = document.getElementById('bulk-exam-select').value;
+    const maxMark = parseFloat(document.getElementById('bulk-max-marks').value) || 100;
+    if (!examId) { showNotification('اختر الامتحان أولاً', 'error'); return; }
+
+    let saved = 0, errors = 0;
+    _bulkGradingStudents.forEach(s => {
+        const inp = document.getElementById('bulk-mark-' + s.id);
+        if (!inp || inp.value.trim() === '') return;
+        const mark = parseFloat(inp.value);
+        if (isNaN(mark) || mark < 0 || mark > maxMark) { errors++; return; }
+        _saveSingleBulkGrade(s.id, examId, mark);
+        saved++;
+    });
+
+    if (errors > 0) showNotification('تم الحفظ مع ' + errors + ' خطأ في بعض الدرجات', 'warning');
+    else if (saved > 0) showNotification('تم حفظ ' + saved + ' درجة بنجاح ✅', 'success');
+    else showNotification('لا توجد درجات جديدة للحفظ', 'warning');
+
+    loadBulkGradingTable(); // إعادة رسم الجدول بعد الحفظ
+}
+
 
 function initFastGrading() {
     const examSelect = document.getElementById('fast-exam-select');
@@ -12373,6 +12662,8 @@ const exposures = {
     submitFastGrade, deleteScore, handleAddExam, openMarksModal,
     printExamResults, updateFastExamMax, printFastGradingReport,
     markRemainingAsExamAbsent, openGradingArchive, initFastGrading,
+    switchGradingTab, initBulkGrading, loadBulkGradingTable, bulkMarkKeyDown, saveBulkGrades,
+    toggleStudentCodeMode, validateManualCode,
     renderExams, filterMarks, markStudentExamAbsentDirect, handleBarcodeGrading,
 
     // Finance & Treasury

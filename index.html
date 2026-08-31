@@ -635,8 +635,22 @@
 
         <!-- Fast Grading Section (The High-Tech Feature) -->
         <section id="fast-grading-section" style="display:none;" class="fade-in text-center">
-            <h2 style="margin-bottom: 2rem;">نظام الرصد السريع بالذكاء الاصطناعي (AI Scanner Grading) ⚡</h2>
+            <h2 style="margin-bottom: 1.5rem;">نظام الرصد السريع بالذكاء الاصطناعي (AI Scanner Grading) ⚡</h2>
 
+            <!-- Grading Mode Tabs -->
+            <div style="display: flex; gap: 0; border-radius: 14px; overflow: hidden; border: 2px solid var(--primary); margin-bottom: 2rem; width: fit-content; margin-left: auto; margin-right: auto;">
+                <button id="tab-scanner-grading" onclick="switchGradingTab('scanner')"
+                    style="padding: 0.65rem 1.8rem; font-weight: 700; background: var(--primary); color: white; border: none; cursor: pointer; font-size: 0.95rem;">
+                    <i class="fas fa-qrcode"></i> رصد بالكاميرا / الجهاز
+                </button>
+                <button id="tab-bulk-grading" onclick="switchGradingTab('bulk')"
+                    style="padding: 0.65rem 1.8rem; font-weight: 700; background: white; color: var(--primary); border: none; cursor: pointer; font-size: 0.95rem;">
+                    <i class="fas fa-list-alt"></i> رصد يدوي جماعي
+                </button>
+            </div>
+
+            <!-- ═══ SCANNER TAB ═══ -->
+            <div id="grading-tab-scanner">
             <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 2.5rem;">
                 <!-- Scanner View -->
                 <div class="card" style="padding: 2rem; border: 4px solid var(--primary); border-radius: 32px;">
@@ -777,6 +791,63 @@
                     </tbody>
                 </table>
             </div>
+            </div><!-- end grading-tab-scanner -->
+
+            <!-- ═══ BULK MANUAL GRADING TAB ═══ -->
+            <div id="grading-tab-bulk" style="display:none;">
+                <!-- Controls Row -->
+                <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: flex-end; justify-content: center;">
+                    <div style="flex:1; min-width:200px;">
+                        <label style="font-weight:700; display:block; margin-bottom:0.4rem;">الامتحان:</label>
+                        <select id="bulk-exam-select" class="form-input" style="height:48px;" onchange="loadBulkGradingTable()">
+                            <option value="">-- اختر الامتحان --</option>
+                        </select>
+                    </div>
+                    <div style="flex:1; min-width:200px;">
+                        <label style="font-weight:700; display:block; margin-bottom:0.4rem;">المجموعة:</label>
+                        <select id="bulk-group-select" class="form-input" style="height:48px;" onchange="loadBulkGradingTable()">
+                            <option value="">-- اختر المجموعة --</option>
+                        </select>
+                    </div>
+                    <div style="min-width:120px;">
+                        <label style="font-weight:700; display:block; margin-bottom:0.4rem;">الدرجة الكاملة:</label>
+                        <input type="number" id="bulk-max-marks" class="form-input" value="100"
+                            style="height:48px; text-align:center; font-weight:800; border-color: var(--vibrant-orange);"
+                            onchange="loadBulkGradingTable()">
+                    </div>
+                    <button class="btn btn-primary" onclick="saveBulkGrades()"
+                        style="height:48px; padding: 0 1.5rem; background: var(--accent);">
+                        <i class="fas fa-save"></i> حفظ الكل
+                    </button>
+                </div>
+
+                <!-- Bulk Table -->
+                <div class="data-table-container" style="border: 2px solid var(--primary); border-radius:16px; overflow:hidden;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:0.8rem 1.2rem; background: var(--bg-light);">
+                        <h3 style="margin:0; font-size:1rem;"><i class="fas fa-table"></i> كشف رصد الدرجات</h3>
+                        <span id="bulk-save-status" style="font-size:0.85rem; color:var(--accent); font-weight:700;"></span>
+                    </div>
+                    <div style="max-height:500px; overflow-y:auto;">
+                        <table style="width:100%; border-collapse:collapse;">
+                            <thead style="position:sticky; top:0; z-index:2; background:var(--primary); color:white;">
+                                <tr>
+                                    <th style="padding:10px 14px; text-align:right;">#</th>
+                                    <th style="padding:10px 14px; text-align:right;">اسم الطالب</th>
+                                    <th style="padding:10px 14px; text-align:center; width:140px;">الدرجة</th>
+                                    <th style="padding:10px 14px; text-align:center;">الحالة</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bulk-grading-tbody">
+                                <tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--text-muted);">اختر الامتحان والمجموعة أولاً</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <p style="text-align:center; color:var(--text-muted); font-size:0.85rem; margin-top:0.8rem;">
+                    <i class="fas fa-info-circle"></i> اكتب الدرجة في الخانة ثم اضغط <kbd>Enter</kbd> للانتقال للطالب التالي تلقائياً
+                </p>
+            </div><!-- end grading-tab-bulk -->
+
         </section>
 
         <!-- Grading Archive Modal -->
@@ -2917,6 +2988,32 @@
                     oninput="checkParentPhone(this.value)">
                 <div id="std-parent-results"
                     style="margin-top: 5px; font-size: 0.85rem; max-height: 100px; overflow-y: auto;"></div>
+            </div>
+            <!-- ── كود الباركود اليدوي ── -->
+            <div class="form-group" style="border: 2px dashed var(--accent); border-radius: 12px; padding: 0.85rem 1rem; background: #f0fdf4;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <label style="font-weight: 700; color: var(--accent); font-size: 0.95rem;">
+                        <i class="fas fa-barcode"></i> كود الباركود
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span id="std-code-mode-label" style="font-size: 0.78rem; color: var(--text-muted);">تلقائي</span>
+                        <label class="toggle-switch" style="width:38px; height:20px; position:relative; display:inline-block; margin:0;">
+                            <input type="checkbox" id="std-code-manual-toggle" onchange="toggleStudentCodeMode(this.checked)"
+                                style="opacity:0; width:0; height:0;">
+                            <span style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccc; border-radius:20px; transition:.3s;"></span>
+                        </label>
+                    </div>
+                </div>
+                <div id="std-code-auto-display" style="font-size: 0.82rem; color: var(--text-muted); padding: 0.3rem 0;">
+                    سيتم توليد كود تلقائي فريد عند الحفظ
+                </div>
+                <div id="std-code-manual-field" style="display:none; margin-top: 0.4rem;">
+                    <input type="text" id="std-manual-code" placeholder="اكتب الكود أو ضع المؤشر هنا وامسح بجهاز الباركود..."
+                        class="form-input"
+                        style="font-family: monospace; font-size: 1rem; letter-spacing: 2px; border-color: var(--accent);"
+                        oninput="validateManualCode(this.value)">
+                    <div id="std-code-validation-msg" style="font-size: 0.8rem; margin-top: 4px;"></div>
+                </div>
             </div>
             <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
                 <button class="btn btn-primary" style="flex: 2;" onclick="handleStudentSubmit()">حفظ
